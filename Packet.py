@@ -10,7 +10,7 @@ class __OpCode(IntEnum):
     DATA  = 3
     ACK   = 4
     ERROR = 5
-__DATA_TRANSFER_PACKET_STRUCT = struct.Struct("! H H")
+DATA_TRANSFER_PACKET_STRUCT = struct.Struct("! H H")
 
 #External Definitions
 PacketType = __OpCode
@@ -58,9 +58,24 @@ class DATAPacket(Packet):
     
     @classmethod    
     def create_from_bytes(cls, b: bytes):
-        _, block_num = struct.unpack(__DATA_TRANSFER_PACKET_STRUCT, b[0:4])
+        _, block_num = DATA_TRANSFER_PACKET_STRUCT.unpack(b[0:4])
         data = b[4:]
         return cls(block_num, data)
+
+@dataclass
+class ACKPacket(Packet):
+    block_num : int
+    
+    def __post_init__(self):
+        self.opcode = PacketType.ACK
+    
+    def create_bytes(self) -> bytes:
+        return create_Ack_packet(self.block_num)
+    
+    @classmethod    
+    def create_from_bytes(cls, b: bytes):
+        _, block_num = DATA_TRANSFER_PACKET_STRUCT.unpack(b[0:4])
+        return cls(block_num)
     
     
 def getOpCode(packet:bytes) -> int:
@@ -75,10 +90,10 @@ def create_WriteRequest_packet(filename:str, mode:str) -> bytes:
     return struct.pack(struct_format, __OpCode.WRQ, filename.encode(), mode.encode())
 
 def create_Data_packet(block_num:int, data:bytes) -> bytes:
-    return __DATA_TRANSFER_PACKET_STRUCT.pack(__OpCode.DATA, block_num) + data
+    return DATA_TRANSFER_PACKET_STRUCT.pack(__OpCode.DATA, block_num) + data
 
 def create_Ack_packet(block_num:int) -> bytes:
-    return __DATA_TRANSFER_PACKET_STRUCT.pack(__OpCode.ACK, block_num)
+    return DATA_TRANSFER_PACKET_STRUCT.pack(__OpCode.ACK, block_num)
 
 def create_Error_packet(error_code:int, error_msg:str) -> bytes:
     struct_format = "! H H x {}s x".format(len(error_msg))

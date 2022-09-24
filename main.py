@@ -3,19 +3,20 @@ import logging
 import socket
 import multiprocessing as mp
 import Packet
+import TFTP_Client
+import os
 
 
 def main():
+    data_size: int
+    Packet.DATAPacket
     logging.basicConfig(level=logging.DEBUG)
     server = TFTP_Server()
     p = mp.Process(target=server.start_server)
     p.start()
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        packet = Packet.create_ReadRequest_packet("README.md", "stub_mode")
-        s.sendto(packet, ("localhost", TFTP_DEFAULT_PORT))
-        print(s.recvfrom(TFTP_MAX_HEADER_SIZE + TFTP_MAX_DATA_SIZE))
-        p.join()
-        
+    os.chdir("./client_dir")
+    TFTP_Client.start_read("localhost", "localhost", "README.md", "stub")     
+    p.join()   
 
 
 if __name__ == '__main__':
