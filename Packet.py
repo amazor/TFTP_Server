@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import IntEnum
+import opcode
 import struct
 
 #Internal Definitions
@@ -18,33 +19,64 @@ OPCODE_SIZE = 2
 
 @dataclass(init=False)
 class Packet(ABC):
+    """Abstract class for packet.
+    
+    Inherits from:
+        ABC (_type_): Abstract Base Class
+    """    
     opcode: PacketType = field(init=False, repr=False) 
     
     @abstractmethod
     def create_bytes(self):
+        """Create a new byte array from class instance"""
         ...
     
     @classmethod
     @abstractmethod
-    def create_from_bytes(cls):
+    def create_from_bytes(cls, b: bytes):
+        """Abstract method for creating inheritted Packet instace
+
+        Args:
+            b (bytes): bytestream to create instance from
+        """        
         ...
-     
-    
-@dataclass
-class RRQPacket(Packet):
+@dataclass(init=False)
+class InitialRequestPacket(Packet):
     filename : str
     mode : str
     
+    @abstractmethod
+    def __post_init__(self):
+        # self.opcode = PacketType.RRQ
+        ...
+        
+    def create_bytes(self) -> bytes:
+        struct_format = "! H {}s x {}s x".format(len(self.filename), len(self.mode))
+        return struct.pack(struct_format, self.opcode, self.filename.encode(), self.mode.encode())
+    
+    @classmethod
+    def create_from_bytes(cls, b: bytes):
+        file_name : bytes
+        mode: bytes
+        op: int  = getOpCode(b)
+        (file_name, mode, empty_string) = b[OPCODE_SIZE:].split(b'\0', maxsplit=2)
+        # TODO: assert empty_string is truly empty
+        
+        instance = cls(file_name.decode(), mode.decode())
+        instance.opcode = op
+        return instance
+        
+    
+@dataclass
+class RRQPacket(InitialRequestPacket):
     def __post_init__(self):
         self.opcode = PacketType.RRQ
+            
+@dataclass
+class WRQPacket(InitialRequestPacket):
+    def __post_init__(self):
+        self.opcode = PacketType.WRQ
     
-    def create_bytes(self) -> bytes:
-        return create_ReadRequest_packet(self.filename, self.mode)
-    
-    @classmethod    
-    def create_from_bytes(cls, b: bytes):
-        return read_ReadRequest_packet(b)
-        
 @dataclass
 class DATAPacket(Packet):
     block_num : int
@@ -100,6 +132,13 @@ def create_Error_packet(error_code:int, error_msg:str) -> bytes:
     return struct.pack(struct_format, PacketType.ERROR, error_code, error_msg.encode())
 
 def read_ReadRequest_packet(packet:bytes) -> RRQPacket:
+    file_name : bytes
+    mode: bytes
+    (file_name, mode, empty_string) = packet[OPCODE_SIZE:].split(b'\0', maxsplit=2)
+    # TODO: assert empty_string is truly empty
+    return RRQPacket(file_name.decode(), mode.decode())
+
+def read_WriteRequest_packet(packet:bytes) -> WRQPacket:
     file_name : bytes
     mode: bytes
     (file_name, mode, empty_string) = packet[OPCODE_SIZE:].split(b'\0', maxsplit=2)

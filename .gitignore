@@ -130,4 +130,6 @@ dmypy.json
 
 # vscode 
 .vscode/
+
 client_dir/
+server_dir/
