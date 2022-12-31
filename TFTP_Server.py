@@ -3,9 +3,9 @@ import socket
 import os
 import threading
 from typing import Callable
-from Packet import PacketType, RRQPacket, WRQPacket, getOpCode
+from Packet import PacketType, RRQPacket, WRQPacket, getOpCode, TFTP_OPCODE_STR_TBL
 
-from TFTPCommon import TFTP_DEFAULT_PORT, TFTP_MAX_DATA_SIZE, TFTP_MAX_HEADER_SIZE
+from TFTPCommon import TFTP_DEFAULT_PORT, TFTP_MAX_PACKET_SIZE
 import TFTPCommon
 
 ILLEGAL_PKT_RC = 0
@@ -13,7 +13,6 @@ FORMAT = """[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"""
 
 # TODO make prettier logging output
 logging.basicConfig(level=logging.DEBUG, format=FORMAT)
-
 
 class TFTP_Server(object):
     def __init__(self,
@@ -51,35 +50,53 @@ class TFTP_Server(object):
     def bind_directory(self, directory: str) -> None:
         self.working_directory = directory
         
-    def __process_packet(self, opcode: PacketType, packet_args: tuple[bytes, str]) -> bool:
+    def __process_packet(self, packet_args: tuple[bytes, str]) -> bool:
         """Process packet request and begin new thread for handling.
 
         Args:
-            opcode (PacketType): The type of packet
             packet_args (tuple[bytes, str]): a tuple of bytes representing the packet and 
 
         Returns:
             bool: True if successful, false otherwise
         """
-        # creates a new thread to handle the request based on the opcode of the packet
         t: threading.Thread
+        opcode: int
+        packet: bytes
+        address: str
         
-        logging.debug(f"Processing Packet {opcode=}")
-        try:
-            t = threading.Thread(target = self.__INITIAL_REQUEST_CALLBACKS__[opcode], args=packet_args)
-        except Exception as e:
-            print(e)
-            logging.error(f"Unknown opcode {opcode},")
-            return False
-        t.start()
-        return True
+        # unpack packet args
+        packet, address = packet_args
+        
+        logging.debug("Checking Packet Legality...")
+        opcode = self.__check_legal_packet(packet)
+        if opcode > 0:
+            logging.debug("Packet is Legal")
+            logging.info(f"Recieved packet type {opcode:02}[{TFTP_OPCODE_STR_TBL[opcode]}] from {address}")
+            try:
+                # creates a new thread to handle the request based on the opcode of the packet
+                t = threading.Thread(target = self.__INITIAL_REQUEST_CALLBACKS__[opcode], args=packet_args)
+                t.start()
+            except KeyError:
+                logging.error(f"No such opcode '{opcode}' in __INITIAL_REQUEST_CALLBACKS__")
+                return False
+            except Exception as e:
+                logging.error(e)
+                print(e)
+                return False
+            return True
+        else:
+            logging.debug(f"Dropping Illegal Packet from {address}")
+            
     
     
     # TODO figure out how to support name mangling for inheritance (__ instead of _)
     def _handle_read_request(self, packet:bytes, address):
         rrqPKT: RRQPacket
+        
         logging.debug(f"Handling read request in thread {threading.get_ident()}")
         rrqPKT = RRQPacket.create_from_bytes(packet)
+        
+        # Create new socket connection to handle read request
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as new_socket:
             self.__add_socket_connection(new_socket)
             TFTPCommon.send_file(os.path.join(self.working_directory, rrqPKT.filename) , address, new_socket)
@@ -88,9 +105,11 @@ class TFTP_Server(object):
     # TODO figure out how to support name mangling for inheritance (__ instead of _)
     def _handle_write_request(self, packet, address):
         wrqPKT: WRQPacket
-        logging.info(f"Handling write request in thread {threading.get_ident()}")
-                
+        
+        logging.info(f"Handling write request in thread {threading.get_ident()}")        
         wrqPKT = WRQPacket.create_from_bytes(packet)
+        
+        # Create new socket connection to handle read request
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as new_socket:
             self.__add_socket_connection(new_socket)
             TFTPCommon.receive_file(os.path.join(self.working_directory, wrqPKT.filename), address, new_socket, isServer=True)
@@ -111,17 +130,14 @@ class TFTP_Server(object):
             return ILLEGAL_PKT_RC
         return opcode
     
-    def start_server(self):
-        packet_type: PacketType
-        
+    def start_server(self):        
         while True:
-            logging.info("TFTP_Server Waiting for packet")
-            packet_args = (packet, address) = self.listen_socket.recvfrom(TFTP_MAX_HEADER_SIZE + TFTP_MAX_DATA_SIZE)
-            packet_type = self.__check_legal_packet(packet)
-            if packet_type > 0:
-                logging.info(f"TFTP_Server Recieved opcode {packet_type:02} from {address}")
-                self.__process_packet(packet_type, packet_args)
-            else:
-                logging.debug(f"Dropping Illegal Packet")
+            logging.info("TFTP_Server Waiting for Packet")
+            # packet_args is a tuple representing the packet contents and the address from which the packet was received
+            # We unpack this tuple to check the legality of packet contents 
+            packet_args = self.listen_socket.recvfrom(TFTP_MAX_PACKET_SIZE)
+            logging.debug("Packet Recieved")
+            self.__process_packet(packet_args)
+
                 
             

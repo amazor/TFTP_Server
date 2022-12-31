@@ -15,6 +15,19 @@ DATA_TRANSFER_PACKET_STRUCT = struct.Struct("! H H")
 
 #External Definitions
 PacketType = __OpCode
+TFTP_OPCODE_STR_TBL : dict = {PacketType.RRQ:"RRQ",
+                              PacketType.WRQ:"WRQ", 
+                              PacketType.DATA:"DATA",
+                              PacketType.ACK:"ACK",
+                              PacketType.ERROR:"ERROR"}
+class Error_Codes(IntEnum):
+    Not_Found_ERR   = 1
+    Access_ERR   = 2
+    Alloc_exceed_ERR  = 3
+    Illegal_TFTP_Oper_ERR   = 4
+    Unknwn_Transfer_ID_ERR = 5
+    File_exists_ERR = 6
+    No_such_usr_ERR = 7
 OPCODE_SIZE = 2
 
 @dataclass(init=False)
@@ -54,12 +67,17 @@ class InitialRequestPacket(Packet):
         struct_format = "! H {}s x {}s x".format(len(self.filename), len(self.mode))
         return struct.pack(struct_format, self.opcode, self.filename.encode(), self.mode.encode())
     
+    # Packet Structure of an Initial Request Packet
+    #           2 bytes    string   1 byte     string   1 byte
+    #    RRQ/   -----------------------------------------------
+    #    WRQ/  | 01/02 |  Filename  |   0  |    Mode    |   0  |
+    #   etc...  -----------------------------------------------
     @classmethod
     def create_from_bytes(cls, b: bytes):
         file_name : bytes
         mode: bytes
         op: int  = getOpCode(b)
-        (file_name, mode, empty_string) = b[OPCODE_SIZE:].split(b'\0', maxsplit=2)
+        (file_name, mode, empty_string) = b[OPCODE_SIZE:].split(b'\0', maxsplit=2) # parse out the Filename and Mode
         # TODO: assert empty_string is truly empty
         
         instance = cls(file_name.decode(), mode.decode())
@@ -108,7 +126,29 @@ class ACKPacket(Packet):
     def create_from_bytes(cls, b: bytes):
         _, block_num = DATA_TRANSFER_PACKET_STRUCT.unpack(b[0:4])
         return cls(block_num)
+ 
+@dataclass
+class ERRORPacket(Packet):
+    errorCode : int
+    errorMsg : str
     
+    def __post_init__(self):
+        self.opcode = PacketType.ERROR
+    
+    def create_bytes(self) -> bytes:
+        return create_Error_packet(self.errorCode, self.errorMsg)
+    
+    @classmethod    
+    def create_from_bytes(cls, b: bytes):
+        _, _errorCode = struct.unpack("!H H", b[0:4])
+        _errorMsg, empty_string = b[4:].split(b'\0', maxsplit=2) # parse out the Filename and Mode 
+        #TODO assert empty_string is empty
+        
+        return cls(_errorCode, _errorMsg)
+
+
+
+ 
     
 def getOpCode(packet:bytes) -> int:
     return struct.unpack("!H", packet[0:2])[0]

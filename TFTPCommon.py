@@ -1,12 +1,12 @@
+from io import BufferedReader
 import os
 import socket
-from Packet import DATAPacket, ACKPacket
+from Packet import DATAPacket, ACKPacket, ERRORPacket, Error_Codes
 
 TFTP_DEFAULT_PORT = 70
 TFTP_MAX_DATA_SIZE = 512
 TFTP_MAX_HEADER_SIZE = 4
 TFTP_MAX_PACKET_SIZE = TFTP_MAX_HEADER_SIZE + TFTP_MAX_DATA_SIZE
-
 
 def verify_ack(packet, block_num, address, request_address) -> bool:
     ack_packet = ACKPacket.create_from_bytes(packet)
@@ -28,14 +28,23 @@ def send_file(filename, request_address, sock:socket.socket):
     dataPKT: DATAPacket
     dataBuffer: bytes
     prev_data_acked: bool = True
+    file : BufferedReader
     
-    with open(filename, 'rb') as f:
-        while (dataBuffer := f.read(TFTP_MAX_DATA_SIZE)) and prev_data_acked:
+    try:
+        file = open(filename, 'rb')
+    except FileNotFoundError:
+        errorPKT = ERRORPacket(Error_Codes.Not_Found_ERR, f"file not found: {filename}")
+        sock.sendto(errorPKT.create_bytes(), request_address) 
+        return 
+    try:
+        while (dataBuffer := file.read(TFTP_MAX_DATA_SIZE)) and prev_data_acked:
             dataPKT = DATAPacket(block_num, dataBuffer)
             sock.sendto(dataPKT.create_bytes(), request_address)
             (packet, address) = sock.recvfrom(TFTP_MAX_PACKET_SIZE)
             prev_data_acked = verify_ack(packet, block_num, address, request_address)
             block_num += 1
+    finally:
+        file.close()
 
 def receive_file(full_file_path, request_address, sock:socket.socket, /, *, isServer=False):
     block_num: int = 0
