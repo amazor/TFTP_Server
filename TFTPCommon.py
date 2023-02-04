@@ -1,9 +1,10 @@
-from io import BufferedReader
+from io import BufferedReader, BufferedWriter, TextIOWrapper
 import os
 import socket
 from Packet import DATAPacket, ACKPacket, ERRORPacket, Error_Codes
+import logging
 
-TFTP_DEFAULT_PORT = 70
+TFTP_DEFAULT_PORT = 69
 TFTP_MAX_DATA_SIZE = 512
 TFTP_MAX_HEADER_SIZE = 4
 TFTP_MAX_PACKET_SIZE = TFTP_MAX_HEADER_SIZE + TFTP_MAX_DATA_SIZE
@@ -23,17 +24,26 @@ def verify_data(packet: DATAPacket, block_num:int, address, request_address) -> 
         return False
     return True 
 
-def send_file(filename, request_address, sock:socket.socket):
+def send_file(filename:str, mode:str, request_address, sock:socket.socket):
     block_num = 1
     dataPKT: DATAPacket
     dataBuffer: bytes
     prev_data_acked: bool = True
-    file : BufferedReader
+    file : BufferedReader # or TextIOWrapper
     
     try:
-        file = open(filename, 'rb')
+        if mode == 'netascii':
+            file = open(filename, 'r')
+        else: # Assume octet if mode is not netascii
+            file = open(filename, 'rb')
     except FileNotFoundError:
+        logging.error(f"file not found: {filename}")
         errorPKT = ERRORPacket(Error_Codes.Not_Found_ERR, f"file not found: {filename}")
+        sock.sendto(errorPKT.create_bytes(), request_address) 
+        return 
+    except IOError: # TODO: handle different windows/linux error codes
+        logging.error(f"Error opening file: {filename}")
+        errorPKT = ERRORPacket(Error_Codes.Access_ERR, f"Error opening file: {filename}")
         sock.sendto(errorPKT.create_bytes(), request_address) 
         return 
     try:
@@ -43,15 +53,20 @@ def send_file(filename, request_address, sock:socket.socket):
             (packet, address) = sock.recvfrom(TFTP_MAX_PACKET_SIZE)
             prev_data_acked = verify_ack(packet, block_num, address, request_address)
             block_num += 1
+    except UnicodeDecodeError as e:
+        logging.error(e)
+        errorPKT = ERRORPacket(Error_Codes.Not_Defined_ERR, f"Unicode Error, try using binary mode: {e}")
+        sock.sendto(errorPKT.create_bytes(), request_address) 
     finally:
         file.close()
 
-def receive_file(full_file_path, request_address, sock:socket.socket, /, *, isServer=False):
+def receive_file(full_file_path:str, mode:str, request_address, sock:socket.socket, /, *, isServer=False):
     block_num: int = 0
     data_pkt: DATAPacket
     data_len: int
     is_data_left: bool = True
     file_dir: str = os.path.dirname(os.path.abspath(full_file_path))
+    file: BufferedWriter # or TextIOWrapper
     
     if isServer:
         # Respond to initial request with ack
@@ -59,15 +74,35 @@ def receive_file(full_file_path, request_address, sock:socket.socket, /, *, isSe
         sock.sendto(ack_pkt.create_bytes(), request_address)
     
     os.makedirs(file_dir, exist_ok=True)
-        
-    with open(os.path.join(file_dir, full_file_path), 'wb') as f:
+    try:
+        if mode == 'netascii':
+            file = open(full_file_path, 'w')
+        else: # Assume octet if mode is not netascii
+            file = open(full_file_path, 'wb')
+    except FileNotFoundError:
+        logging.error(f"file not found: {full_file_path}")
+        errorPKT = ERRORPacket(Error_Codes.Not_Found_ERR, f"file not found: {full_file_path}")
+        sock.sendto(errorPKT.create_bytes(), request_address) 
+        return 
+    except OSError: # TODO: handle different windows/linux error codes
+        logging.error(f"Error opening file: {full_file_path}")
+        errorPKT = ERRORPacket(Error_Codes.Access_ERR, f"Error opening file: {full_file_path}")
+        sock.sendto(errorPKT.create_bytes(), request_address) 
+        return 
+    try:
         while is_data_left:
             block_num += 1
             (data_bytes, addr) = sock.recvfrom(TFTP_MAX_PACKET_SIZE)
             data_pkt = DATAPacket.create_from_bytes(data_bytes)
             verify_data(data_pkt, block_num, addr, request_address)
                 
-            f.write(data_pkt.data)
+            file.write(data_pkt.data)
             sock.sendto(ACKPacket(block_num).create_bytes(), addr)
             data_len = len(data_pkt.data)
             is_data_left = data_len == TFTP_MAX_DATA_SIZE
+    except UnicodeDecodeError as e:
+        logging.error(e)
+        errorPKT = ERRORPacket(Error_Codes.Not_Defined_ERR, f"Unicode Error, try using binary mode: {e}")
+        sock.sendto(errorPKT.create_bytes(), request_address) 
+    finally:
+        file.close()

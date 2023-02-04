@@ -3,7 +3,7 @@ import socket
 import os
 import threading
 from typing import Callable
-from Packet import PacketType, RRQPacket, WRQPacket, getOpCode, TFTP_OPCODE_STR_TBL
+from Packet import Error_Codes, PacketType, RRQPacket, WRQPacket, ERRORPacket, getOpCode, TFTP_OPCODE_STR_TBL
 
 from TFTPCommon import TFTP_DEFAULT_PORT, TFTP_MAX_PACKET_SIZE
 import TFTPCommon
@@ -86,6 +86,10 @@ class TFTP_Server(object):
             return True
         else:
             logging.debug(f"Dropping Illegal Packet from {address}")
+            errorPKT = ERRORPacket(Error_Codes.Access_ERR, "Illegal TFTP operation")
+            self.listen_socket.sendto(errorPKT.create_bytes(), address)
+            return False
+
             
     
     
@@ -95,11 +99,12 @@ class TFTP_Server(object):
         
         logging.debug(f"Handling read request in thread {threading.get_ident()}")
         rrqPKT = RRQPacket.create_from_bytes(packet)
+        logging.debug(f"Requesting file: {rrqPKT.filename}")
         
         # Create new socket connection to handle read request
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as new_socket:
             self.__add_socket_connection(new_socket)
-            TFTPCommon.send_file(os.path.join(self.working_directory, rrqPKT.filename) , address, new_socket)
+            TFTPCommon.send_file(os.path.join(self.working_directory, rrqPKT.filename), rrqPKT.mode, address, new_socket)
             self.__remove_socket_connection(new_socket)     
             
     # TODO figure out how to support name mangling for inheritance (__ instead of _)
@@ -108,11 +113,12 @@ class TFTP_Server(object):
         
         logging.info(f"Handling write request in thread {threading.get_ident()}")        
         wrqPKT = WRQPacket.create_from_bytes(packet)
-        
+        logging.debug(f"Requesting file: {wrqPKT.filename}")
+
         # Create new socket connection to handle read request
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as new_socket:
             self.__add_socket_connection(new_socket)
-            TFTPCommon.receive_file(os.path.join(self.working_directory, wrqPKT.filename), address, new_socket, isServer=True)
+            TFTPCommon.receive_file(os.path.join(self.working_directory, wrqPKT.filename), wrqPKT.mode, address, new_socket, isServer=True)
             self.__remove_socket_connection(new_socket)     
 
     def __check_legal_packet(self, packet: bytes) -> int:

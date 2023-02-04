@@ -4,10 +4,10 @@ import TFTP_Client
 import os
 
 def test_server_get(from_addr, to_addr) -> bool:
-    TFTP_Client.read(from_addr, to_addr, "server_docX.txt", "stub")     
+    TFTP_Client.read(from_addr, to_addr, "server_doc.txt", "octet")     
 
 def test_server_put(from_addr, to_addr) -> bool:
-    TFTP_Client.write(from_addr, to_addr, "client_doc.txt", "stub")     
+    TFTP_Client.write(from_addr, to_addr, "client_doc.txt", "octet")     
     
     
 def main():

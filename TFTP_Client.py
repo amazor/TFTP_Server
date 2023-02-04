@@ -15,7 +15,7 @@ def read(from_addr, to_addr, filename, mode):
         sock.sendto(rrq_pkt.create_bytes(), to_addr)
         
         # Recieve Data and send Ack loop
-        TFTPCommon.receive_file(filename, to_addr, sock, isServer=False)
+        TFTPCommon.receive_file(filename, mode, to_addr, sock, isServer=False)
         # with open(filename, "wb") as f:
         #     print("opened new file: " + filename)
         #     while packet_size == TFTPCommon.TFTP_MAX_PACKET_SIZE:
@@ -41,4 +41,4 @@ def write(from_addr, to_addr, filename, mode):
             (pkt, addr) = sock.recvfrom(packet_size)
             
             #assume packet is ACK packet
-            TFTPCommon.send_file(filename, addr, sock)
+            TFTPCommon.send_file(filename, mode, addr, sock)

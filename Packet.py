@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import IntEnum
-import opcode
+import logging
 import struct
 
 #Internal Definitions
@@ -21,13 +21,14 @@ TFTP_OPCODE_STR_TBL : dict = {PacketType.RRQ:"RRQ",
                               PacketType.ACK:"ACK",
                               PacketType.ERROR:"ERROR"}
 class Error_Codes(IntEnum):
+    Not_Defined_ERR     = 0
     Not_Found_ERR   = 1
     Access_ERR   = 2
-    Alloc_exceed_ERR  = 3
+    Alloc_Exceed_ERR  = 3
     Illegal_TFTP_Oper_ERR   = 4
     Unknwn_Transfer_ID_ERR = 5
-    File_exists_ERR = 6
-    No_such_usr_ERR = 7
+    File_Exists_ERR = 6
+    No_Such_Usr_ERR = 7
 OPCODE_SIZE = 2
 
 @dataclass(init=False)
@@ -77,6 +78,8 @@ class InitialRequestPacket(Packet):
         file_name : bytes
         mode: bytes
         op: int  = getOpCode(b)
+        
+        logging.debug(f"Recieved data: {b}")
         (file_name, mode, empty_string) = b[OPCODE_SIZE:].split(b'\0', maxsplit=2) # parse out the Filename and Mode
         # TODO: assert empty_string is truly empty
         
@@ -95,6 +98,10 @@ class WRQPacket(InitialRequestPacket):
     def __post_init__(self):
         self.opcode = PacketType.WRQ
     
+#     2 bytes    2 bytes       n bytes
+#        ---------------------------------
+# DATA  | 03    |   Block #  |    Data    |
+#        ---------------------------------
 @dataclass
 class DATAPacket(Packet):
     block_num : int
@@ -112,6 +119,11 @@ class DATAPacket(Packet):
         data = b[4:]
         return cls(block_num, data)
 
+#        2 bytes    2 bytes
+#        -------------------
+# ACK   | 04    |   Block #  |
+#        --------------------
+
 @dataclass
 class ACKPacket(Packet):
     block_num : int
@@ -126,7 +138,11 @@ class ACKPacket(Packet):
     def create_from_bytes(cls, b: bytes):
         _, block_num = DATA_TRANSFER_PACKET_STRUCT.unpack(b[0:4])
         return cls(block_num)
- 
+
+#         2 bytes  2 bytes        string    1 byte
+#        ----------------------------------------
+# ERROR | 05    |  ErrorCode |   ErrMsg   |   0  |
+#        ----------------------------------------
 @dataclass
 class ERRORPacket(Packet):
     errorCode : int
@@ -161,8 +177,13 @@ def create_WriteRequest_packet(filename:str, mode:str) -> bytes:
     struct_format = "! H {}s x {}s x".format(len(filename), len(mode))
     return struct.pack(struct_format, __OpCode.WRQ, filename.encode(), mode.encode())
 
-def create_Data_packet(block_num:int, data:bytes) -> bytes:
-    return DATA_TRANSFER_PACKET_STRUCT.pack(__OpCode.DATA, block_num) + data
+def create_Data_packet(block_num:int, data) -> bytes:
+    if isinstance(data, str):
+        return DATA_TRANSFER_PACKET_STRUCT.pack(__OpCode.DATA, block_num) + data.encode()
+    else:
+        return DATA_TRANSFER_PACKET_STRUCT.pack(__OpCode.DATA, block_num) + data
+
+        
 
 def create_Ack_packet(block_num:int) -> bytes:
     return DATA_TRANSFER_PACKET_STRUCT.pack(__OpCode.ACK, block_num)
